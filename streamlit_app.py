@@ -123,6 +123,10 @@ def build_table():
     df["Ped → Alb (days)"] = (df["Albaran Date"] - df["Pedido Date"]).dt.days
     df["Alb → Fac (days)"] = (df["Factura Date"] - df["Albaran Date"]).dt.days
 
+
+    for col in date_cols:
+        df[col] = df[col].dt.strftime("%d-%m-%Y")
+        
     # Final column order
     return df[[
         "Client", "Total",

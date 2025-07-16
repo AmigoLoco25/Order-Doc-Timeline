@@ -56,35 +56,79 @@ def fetch_docs(doc_type):
 # ---------- MAIN LOGIC ----------
 @st.cache_data(ttl=3600)
 def build_table():
-    # Fetch and rename
-    presupuesto = fetch_docs("estimate")
-    presupuesto = presupuesto.rename(columns={
+    # --- Fetch base docs ---
+    presupuesto = fetch_docs("estimate").rename(columns={
         "id": "presupuesto_id",
         "contactName": "Client",
-        "total": "Total",
-        "date": "Presupuesto Date",
-        "docNumber": "Presupuesto DocNum"
-    })[["presupuesto_id", "Client", "Total", "Presupuesto Date", "Presupuesto DocNum"]]
+        "docNumber": "Presupuesto DocNum",
+        "date": "Presupuesto Date"
+    })[["presupuesto_id", "Client", "Presupuesto Date", "Presupuesto DocNum"]]
 
-    proforma = fetch_docs("proform")
-    proforma["from_dict"] = proforma["from"].apply(parse_from_cell)
-    proforma = proforma[proforma["from_dict"].apply(lambda d: d.get("docType") == "estimate")]
-    proforma["from_id_proforma"] = proforma["from_dict"].apply(lambda d: d.get("id"))
-    proforma = proforma.rename(columns={
+    proforma = fetch_docs("proform").rename(columns={
         "id": "proforma_id",
+        "docNumber": "Proforma DocNum",
         "date": "Proforma Date",
-        "docNumber": "Proforma DocNum"
-    })[["from_id_proforma", "proforma_id", "Proforma Date", "Proforma DocNum"]]
+        "from": "from_proforma"
+    })
+    proforma["from_dict"] = proforma["from_proforma"].apply(parse_from_cell)
+    proforma["from_id_presupuesto"] = proforma["from_dict"].apply(lambda d: d.get("id"))
+    proforma = proforma[["proforma_id", "Proforma Date", "Proforma DocNum", "from_id_presupuesto"]]
 
-    pedido = fetch_docs("salesorder")
-    pedido["from_dict"] = pedido["from"].apply(parse_from_cell)
-    pedido["from_id_pedido"] = pedido["from_dict"].apply(lambda d: d.get("id"))
-    pedido = pedido.rename(columns={
+    pedido = fetch_docs("salesorder").rename(columns={
         "id": "pedido_id",
         "date": "Pedido Date",
         "docNumber": "Pedido DocNum"
-    })[["from_id_pedido", "pedido_id", "Pedido Date", "Pedido DocNum"]]
+    })
+    pedido["from_dict"] = pedido["from"].apply(parse_from_cell)
+    pedido["from_docType"] = pedido["from_dict"].apply(lambda d: d.get("docType"))
+    pedido["from_id"] = pedido["from_dict"].apply(lambda d: d.get("id"))
+    pedido = pedido[["pedido_id", "Pedido Date", "Pedido DocNum", "from_docType", "from_id"]]
 
+    # --- Link pedido → proforma ---
+    pedido_proforma = pedido[pedido["from_docType"] == "proform"].merge(
+        proforma, left_on="from_id", right_on="proforma_id", how="left"
+    )
+
+    # → then link to presupuesto via proforma
+    pedido_proforma = pedido_proforma.merge(
+        presupuesto, left_on="from_id_presupuesto", right_on="presupuesto_id", how="left"
+    )
+
+    # --- Link pedido → presupuesto directly ---
+    pedido_presupuesto = pedido[pedido["from_docType"] == "estimate"].merge(
+        presupuesto, left_on="from_id", right_on="presupuesto_id", how="left"
+    )
+    pedido_presupuesto["Proforma DocNum"] = pd.NA
+    pedido_presupuesto["Proforma Date"] = pd.NaT
+
+    # --- Standalone pedidos ---
+    pedido_standalone = pedido[pedido["from_docType"].isna()]
+    pedido_standalone["Client"] = pd.NA
+    pedido_standalone["Presupuesto DocNum"] = pd.NA
+    pedido_standalone["Presupuesto Date"] = pd.NaT
+    pedido_standalone["Proforma DocNum"] = pd.NA
+    pedido_standalone["Proforma Date"] = pd.NaT
+
+    # --- Combine all paths ---
+    all_pedidos = pd.concat([
+        pedido_proforma[[
+            "Client", "pedido_id", "Pedido DocNum", "Pedido Date",
+            "Proforma DocNum", "Proforma Date",
+            "Presupuesto DocNum", "Presupuesto Date"
+        ]],
+        pedido_presupuesto[[
+            "Client", "pedido_id", "Pedido DocNum", "Pedido Date",
+            "Proforma DocNum", "Proforma Date",
+            "Presupuesto DocNum", "Presupuesto Date"
+        ]],
+        pedido_standalone[[
+            "Client", "pedido_id", "Pedido DocNum", "Pedido Date",
+            "Proforma DocNum", "Proforma Date",
+            "Presupuesto DocNum", "Presupuesto Date"
+        ]]
+    ], ignore_index=True)
+
+    # --- Link to Albarán ---
     albaran = fetch_docs("waybill")
     albaran["from_dict"] = albaran["from"].apply(parse_from_cell)
     albaran = albaran[albaran["from_dict"].apply(lambda d: d.get("docType") == "salesorder")]
@@ -95,6 +139,9 @@ def build_table():
         "docNumber": "Albaran DocNum"
     })[["from_id_albaran", "albaran_id", "Albaran Date", "Albaran DocNum"]]
 
+    all_pedidos = all_pedidos.merge(albaran, left_on="pedido_id", right_on="from_id_albaran", how="left")
+
+    # --- Link to Factura ---
     factura = fetch_docs("invoice")
     factura["from_dict"] = factura["from"].apply(parse_from_cell)
     factura = factura[factura["from_dict"].apply(lambda d: d.get("docType") == "waybill")]
@@ -104,41 +151,35 @@ def build_table():
         "docNumber": "Factura DocNum"
     })[["from_id_factura", "Factura Date", "Factura DocNum"]]
 
-    # Merge
-    df = presupuesto.merge(proforma, left_on="presupuesto_id", right_on="from_id_proforma", how="left")
-    df = df.merge(pedido, left_on="proforma_id", right_on="from_id_pedido", how="left")
-    df = df.merge(albaran, left_on="pedido_id", right_on="from_id_albaran", how="left")
-    df = df.merge(factura, left_on="albaran_id", right_on="from_id_factura", how="left")
+    all_pedidos = all_pedidos.merge(factura, left_on="albaran_id", right_on="from_id_factura", how="left")
 
-    # Timezone-aware conversion
+    # --- Format dates ---
     madrid_tz = pytz.timezone('Europe/Madrid')
-    date_cols = ["Presupuesto Date", "Proforma Date", "Pedido Date", "Albaran Date", "Factura Date"]
+    date_cols = [
+        "Presupuesto Date", "Proforma Date", "Pedido Date", "Albaran Date", "Factura Date"
+    ]
     for col in date_cols:
-        if col in df.columns:
-            df[col] = df[col].apply(
-    lambda ts: datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(madrid_tz)
-    if pd.notnull(ts) else pd.NaT
-)
+        if col in all_pedidos.columns:
+            all_pedidos[col] = all_pedidos[col].apply(
+                lambda ts: datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(madrid_tz)
+                if pd.notnull(ts) else pd.NaT
+            )
 
-    # Time differences
-    df["Pres → Prof (days)"] = (df["Proforma Date"] - df["Presupuesto Date"]).dt.days
-    df["Prof → Ped (days)"] = (df["Pedido Date"] - df["Proforma Date"]).dt.days
-    df["Ped → Alb (days)"] = (df["Albaran Date"] - df["Pedido Date"]).dt.days
-    df["Alb → Fac (days)"] = (df["Factura Date"] - df["Albaran Date"]).dt.days
+    # --- Time deltas ---
+    all_pedidos["Pres → Prof (days)"] = (all_pedidos["Proforma Date"] - all_pedidos["Presupuesto Date"]).dt.days
+    all_pedidos["Prof → Ped (days)"] = (all_pedidos["Pedido Date"] - all_pedidos["Proforma Date"]).dt.days
+    all_pedidos["Ped → Alb (days)"] = (all_pedidos["Albaran Date"] - all_pedidos["Pedido Date"]).dt.days
+    all_pedidos["Alb → Fac (days)"] = (all_pedidos["Factura Date"] - all_pedidos["Albaran Date"]).dt.days
 
-
+    # --- Final formatting ---
     for col in date_cols:
-        df[col] = df[col].dt.strftime("%d-%m-%Y")
-        
-    df["__sort_date"] = pd.to_datetime(df["Pedido Date"], format="%d-%m-%Y", errors="coerce")
-    df = df.sort_values("__sort_date", ascending=False).drop(columns="__sort_date")
+        all_pedidos[col] = all_pedidos[col].dt.strftime("%d-%m-%Y")
 
-    df = df[df["Pedido DocNum"].notna()]
-    
-    # Reorder final columns
-    return df[[
-        "Client", "Total",
-        "Presupuesto DocNum","Presupuesto Date", "Pres → Prof (days)",
+    all_pedidos["__sort_date"] = pd.to_datetime(all_pedidos["Pedido Date"], format="%d-%m-%Y", errors="coerce")
+    all_pedidos = all_pedidos.sort_values("__sort_date", ascending=False).drop(columns="__sort_date")
+
+    return all_pedidos[[
+        "Client", "Presupuesto DocNum", "Presupuesto Date", "Pres → Prof (days)",
         "Proforma DocNum", "Proforma Date", "Prof → Ped (days)",
         "Pedido DocNum", "Pedido Date", "Ped → Alb (days)",
         "Albaran DocNum", "Albaran Date", "Alb → Fac (days)",

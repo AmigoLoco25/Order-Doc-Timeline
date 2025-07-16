@@ -3,7 +3,8 @@ import pandas as pd
 import requests
 import json
 import ast
-from datetime import datetime
+from datetime import datetime, timezone
+import pytz
 
 # ---------- AUTHENTICATION ----------
 api_key = st.secrets["HOLDED_API_KEY"]
@@ -29,7 +30,7 @@ This tool displays the complete lifecycle of orders through all document stages:
 All data is pulled live from Holded via the API.
 """)
 
-# ---------- HELPER ----------
+# ---------- HELPERS ----------
 def parse_from_cell(x):
     if isinstance(x, dict):
         return x
@@ -106,9 +107,15 @@ def build_table():
     df = df.merge(albaran, left_on="pedido_id", right_on="from_id_albaran", how="left")
     df = df.merge(factura, left_on="albaran_id", right_on="from_id_factura", how="left")
 
-    # Convert to datetime
-    for col in ["Presupuesto Date", "Proforma Date", "Pedido Date", "Albaran Date", "Factura Date"]:
-        df[col] = pd.to_datetime(df[col], errors="coerce")
+    # Timezone-aware conversion
+    madrid_tz = pytz.timezone('Europe/Madrid')
+    date_cols = ["Presupuesto Date", "Proforma Date", "Pedido Date", "Albaran Date", "Factura Date"]
+    for col in date_cols:
+        if col in df.columns:
+            df[col] = df[col].apply(
+                lambda ts: datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(madrid_tz).date()
+                if pd.notnull(ts) else pd.NaT
+            )
 
     # Time differences
     df["Pres → Prof (days)"] = (df["Proforma Date"] - df["Presupuesto Date"]).dt.days

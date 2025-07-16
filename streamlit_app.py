@@ -137,12 +137,11 @@ def build_table():
     # Reorder final columns
     return df[[
         "Client", "Total",
-        "Presupuesto Date", "Pres → Prof (days)",
-        "Proforma Date", "Prof → Ped (days)",
-        "Pedido Date", "Ped → Alb (days)",
-        "Albaran Date", "Alb → Fac (days)",
-        "Factura Date",
-        "Presupuesto DocNum", "Proforma DocNum", "Pedido DocNum", "Albaran DocNum", "Factura DocNum"
+        "Presupuesto DocNum","Presupuesto Date", "Pres → Prof (days)",
+        "Proforma DocNum", "Proforma Date", "Prof → Ped (days)",
+        "Pedido DocNum", "Pedido Date", "Ped → Alb (days)",
+        "Albaran DocNum", "Albaran Date", "Alb → Fac (days)",
+        "Factura DocNum", "Factura Date"
     ]]
 
 # ---------- UI ----------

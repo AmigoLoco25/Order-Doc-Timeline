@@ -13,21 +13,25 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    user_input = st.text_input("🔐 Ingrese la contraseña", type="password")
+    user_input = st.text_input("🔐 Enter password to access", type="password")
     if user_input == PASSCODE:
         st.session_state.authenticated = True
         st.rerun()
     elif user_input:
-        st.error("Contraseña incorrecta.")
+        st.error("Incorrect password.")
     st.stop()
 
-st.set_page_config(page_title="Fechas entre Documentos", layout="wide")
-st.title("📄 Fechas entre Presupuesto → Proforma → Pedido")
+st.set_page_config(page_title="Order Document Timeline", layout="wide")
+st.title("📄 Order Document Timeline Report")
 
-st.markdown("Ingrese un número de documento o deje vacío para ver todos.")
+st.markdown("""
+This tool displays the complete timeline of each order through the document lifecycle:  
+**Presupuesto → Proforma → Pedido → Albarán → Factura**  
+You can search by any **Pedido** document number.
+""")
 
-# ---------- HELPER ----------
-def parse_from_cell(x):
+# ---------- UTIL ----------
+def parse_cell(x):
     if isinstance(x, dict):
         return x
     if isinstance(x, str):
@@ -37,72 +41,104 @@ def parse_from_cell(x):
             return ast.literal_eval(x)
     return {}
 
-# ---------- FETCH ESTIMATES ----------
-@st.cache_data(ttl=3600)
-def fetch_estimates():
-    url = "https://api.holded.com/api/invoicing/v1/documents/estimate"
+# ---------- FETCH FUNCTIONS ----------
+def fetch_docs(doc_type):
+    url = f"https://api.holded.com/api/invoicing/v1/documents/{doc_type}"
     headers = {"accept": "application/json", "key": api_key}
     resp = requests.get(url, headers=headers)
-    df = pd.DataFrame(resp.json())
-    return df[["id", "date", "docNumber"]].rename(columns={"date": "Presupuesto Date", "docNumber": "Presupuesto DocNum"})
+    resp.raise_for_status()
+    return pd.DataFrame(resp.json())
 
-# ---------- FETCH PROFORMAS ----------
 @st.cache_data(ttl=3600)
-def fetch_proformas():
-    url = "https://api.holded.com/api/invoicing/v1/documents/proform"
-    headers = {"accept": "application/json", "key": api_key}
-    resp = requests.get(url, headers=headers)
-    df = pd.DataFrame(resp.json())
-    df["from_dict"] = df["from"].apply(parse_from_cell)
-    df = df[df["from_dict"].apply(lambda d: d.get("docType") == "estimate")]
-    df["from_id"] = df["from_dict"].apply(lambda d: d.get("id"))
-    df = df.rename(columns={"date": "Proforma Date", "docNumber": "Proforma DocNum", "id": "prof_id"})
-    return df[["Proforma Date", "Proforma DocNum", "from_id", "prof_id"]].rename(columns={"from_id": "id"})
-
-# ---------- FETCH PEDIDOS ----------
-@st.cache_data(ttl=3600)
-def fetch_pedidos():
-    url = "https://api.holded.com/api/invoicing/v1/documents/salesorder"
-    headers = {"accept": "application/json", "key": api_key}
-    resp = requests.get(url, headers=headers)
-    df = pd.DataFrame(resp.json())
-    df["from_dict"] = df["from"].apply(parse_from_cell)
-    df = df[df["from_dict"].apply(lambda d: d.get("docType") == "proform")]
-    df["from_id"] = df["from_dict"].apply(lambda d: d.get("id"))
-    df = df.rename(columns={"date": "Pedido Date", "docNumber": "Pedido DocNum", "id": "pedido_id"})
-    return df[["Pedido Date", "Pedido DocNum", "from_id", "pedido_id"]].rename(columns={"from_id": "prof_id"})
-
-# ---------- PROCESS ----------
 def build_table():
-    pres = fetch_estimates()
-    prof = fetch_proformas()
-    ped = fetch_pedidos()
+    presup = fetch_docs("estimate")[["id", "date", "docNumber", "contactName", "total"]]
+    presup.rename(columns={
+        "id": "pres_id",
+        "date": "Presupuesto Date",
+        "docNumber": "Presupuesto DocNum",
+        "contactName": "Client",
+        "total": "Total (€)"
+    }, inplace=True)
 
-    merged = pd.merge(pres, prof, on="id", how="left")
-    merged = pd.merge(merged, ped, on="prof_id", how="left")
+    proforma = fetch_docs("proform")
+    proforma["from_dict"] = proforma["from"].apply(parse_cell)
+    proforma = proforma[proforma["from_dict"].apply(lambda d: d.get("docType") == "estimate")]
+    proforma["pres_id"] = proforma["from_dict"].apply(lambda d: d.get("id"))
+    proforma.rename(columns={
+        "id": "prof_id",
+        "date": "Proforma Date",
+        "docNumber": "Proforma DocNum"
+    }, inplace=True)
 
-    # Convert to datetime
-    for col in ["Presupuesto Date", "Proforma Date", "Pedido Date"]:
-        merged[col] = pd.to_datetime(merged[col], errors="coerce")
+    pedido = fetch_docs("salesorder")
+    pedido["from_dict"] = pedido["from"].apply(parse_cell)
+    pedido = pedido[pedido["from_dict"].apply(lambda d: d.get("docType") == "proform")]
+    pedido["prof_id"] = pedido["from_dict"].apply(lambda d: d.get("id"))
+    pedido.rename(columns={
+        "id": "pedido_id",
+        "date": "Pedido Date",
+        "docNumber": "Pedido DocNum"
+    }, inplace=True)
 
-    # Calculate intervals
-    merged["Días a Proforma"] = (merged["Proforma Date"] - merged["Presupuesto Date"]).dt.days
-    merged["Días a Pedido"] = (merged["Pedido Date"] - merged["Proforma Date"]).dt.days
+    albaran = fetch_docs("deliverynote")
+    albaran["from_dict"] = albaran["from"].apply(parse_cell)
+    albaran = albaran[albaran["from_dict"].apply(lambda d: d.get("docType") == "salesorder")]
+    albaran["pedido_id"] = albaran["from_dict"].apply(lambda d: d.get("id"))
+    albaran.rename(columns={
+        "id": "albaran_id",
+        "date": "Albarán Date",
+        "docNumber": "Albarán DocNum"
+    }, inplace=True)
 
-    return merged
+    factura = fetch_docs("invoice")
+    factura["from_dict"] = factura["from"].apply(parse_cell)
+    factura = factura[factura["from_dict"].apply(lambda d: d.get("docType") == "deliverynote")]
+    factura["albaran_id"] = factura["from_dict"].apply(lambda d: d.get("id"))
+    factura.rename(columns={
+        "id": "factura_id",
+        "date": "Factura Date",
+        "docNumber": "Factura DocNum"
+    }, inplace=True)
+
+    # Merge all
+    df = presup.merge(proforma, on="pres_id", how="left")\
+               .merge(pedido, on="prof_id", how="left")\
+               .merge(albaran, on="pedido_id", how="left")\
+               .merge(factura, on="albaran_id", how="left")
+
+    # Convert dates
+    date_cols = [
+        "Presupuesto Date", "Proforma Date", "Pedido Date",
+        "Albarán Date", "Factura Date"
+    ]
+    for col in date_cols:
+        df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    # Calculate durations
+    df["→ Proforma (Days)"] = (df["Proforma Date"] - df["Presupuesto Date"]).dt.days
+    df["→ Pedido (Days)"] = (df["Pedido Date"] - df["Proforma Date"]).dt.days
+    df["→ Albarán (Days)"] = (df["Albarán Date"] - df["Pedido Date"]).dt.days
+    df["→ Factura (Days)"] = (df["Factura Date"] - df["Albarán Date"]).dt.days
+
+    # Reorder
+    final_cols = [
+        "Client", "Total (€)",
+        "Presupuesto Date", "→ Proforma (Days)", "Proforma Date", "→ Pedido (Days)",
+        "Pedido Date", "→ Albarán (Days)", "Albarán Date", "→ Factura (Days)", "Factura Date",
+        "Presupuesto DocNum", "Proforma DocNum", "Pedido DocNum", "Albarán DocNum", "Factura DocNum"
+    ]
+    return df[final_cols]
 
 # ---------- UI ----------
 df = build_table()
 
-search_input = st.text_input("Filtrar por DocNumber (opcional):")
-if search_input:
-    df = df[df.apply(lambda row: search_input.lower() in str(row["Presupuesto DocNum"]).lower(), axis=1)]
+pedido_search = st.text_input("Search by Pedido DocNum (optional):")
+if pedido_search:
+    df = df[df["Pedido DocNum"].str.contains(pedido_search, case=False, na=False)]
 
 if df.empty:
-    st.warning("No se encontraron documentos.")
+    st.warning("No documents found.")
 else:
-    st.success("Datos obtenidos correctamente.")
     st.dataframe(df, use_container_width=True)
-
     csv = df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button("📥 Descargar CSV", data=csv, file_name="documentos_holded.csv", mime="text/csv")
+    st.download_button("📥 Download CSV", data=csv, file_name="order_document_timeline.csv", mime="text/csv")

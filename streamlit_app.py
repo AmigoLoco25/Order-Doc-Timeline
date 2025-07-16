@@ -78,7 +78,6 @@ def build_table():
 
     pedido = fetch_docs("salesorder")
     pedido["from_dict"] = pedido["from"].apply(parse_from_cell)
-    pedido = pedido[pedido["from_dict"].apply(lambda d: d.get("docType") == "proform")]
     pedido["from_id_pedido"] = pedido["from_dict"].apply(lambda d: d.get("id"))
     pedido = pedido.rename(columns={
         "id": "pedido_id",
@@ -133,6 +132,8 @@ def build_table():
         
     df["__sort_date"] = pd.to_datetime(df["Pedido Date"], format="%d-%m-%Y", errors="coerce")
     df = df.sort_values("__sort_date", ascending=False).drop(columns="__sort_date")
+
+    df = df[df["Pedido DocNum"].notna()]
     
     # Reorder final columns
     return df[[

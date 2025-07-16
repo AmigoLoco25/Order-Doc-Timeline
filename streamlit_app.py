@@ -5,6 +5,7 @@ import json
 import ast
 from datetime import datetime, timezone
 import pytz
+import io
 
 # ---------- AUTHENTICATION ----------
 api_key = st.secrets["HOLDED_API_KEY"]
@@ -136,7 +137,7 @@ def build_table():
         "Albaran Date", "Alb → Fac (days)",
         "Factura Date",
         "Presupuesto DocNum", "Proforma DocNum", "Pedido DocNum", "Albaran DocNum", "Factura DocNum"
-    ]].sort_values("Presupuesto Date")
+    ]].sort_values("Presupuesto Date", ascending=False)
 
 # ---------- UI ----------
 df = build_table()
@@ -152,3 +153,23 @@ else:
 
     csv = df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("📥 Download CSV", data=csv, file_name="order_timeline.csv", mime="text/csv")
+
+    if search:
+        filename=f"{search}_order_timeline.xlsx"
+    else:
+        filename="order_timeline.xlsx"
+    excel_buffer = io.BytesIO()
+                    
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Sheet1')
+    excel_buffer.seek(0)
+                    
+                        # Download button
+    st.download_button(
+        label="📥 Download Excel",
+        data=excel_buffer,
+        file_name=filename,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+
+

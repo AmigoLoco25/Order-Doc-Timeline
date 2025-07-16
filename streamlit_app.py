@@ -54,31 +54,30 @@ def fetch_docs(doc_type):
 
 @st.cache_data(ttl=3600)
 def build_table():
-    # 1) Load all document sets
+    # 1) Load all docs
     presupuesto_df = fetch_docs("estimate")
     proforma_df    = fetch_docs("proform")
     pedidos_df     = fetch_docs("salesorder")
     albaran_df     = fetch_docs("waybill")
     factura_df     = fetch_docs("invoice")
 
-    # 2) Prep Presupuesto
+    # 2) Prep Presupuesto — drop its own Client to avoid collisions
     presupuesto_df = presupuesto_df.rename(columns={
         "id": "presupuesto_id",
-        "contactName": "Client",
         "date": "Presupuesto Date",
         "docNumber": "Presupuesto DocNum"
-    })[["presupuesto_id", "Client", "Presupuesto Date", "Presupuesto DocNum"]]
+    })[["presupuesto_id", "Presupuesto Date", "Presupuesto DocNum"]]
 
     # 3) Prep Proforma
-    proforma_df["from_dict"]             = proforma_df["from"].apply(parse_from_cell)
-    proforma_df["from_id_presupuesto"]   = proforma_df["from_dict"].apply(lambda d: d.get("id"))
+    proforma_df["from_dict"]           = proforma_df["from"].apply(parse_from_cell)
+    proforma_df["from_id_presupuesto"] = proforma_df["from_dict"].apply(lambda d: d.get("id"))
     proforma_df = proforma_df.rename(columns={
         "id": "proforma_id",
         "date": "Proforma Date",
         "docNumber": "Proforma DocNum"
     })[["proforma_id", "Proforma Date", "Proforma DocNum", "from_id_presupuesto"]]
 
-    # 4) Prep Pedido base
+    # 4) Prep Pedido base (this contains the SalesOrder contactName → Client)
     pedidos_df["from_dict"]    = pedidos_df["from"].apply(parse_from_cell)
     pedidos_df["from_docType"] = pedidos_df["from_dict"].apply(lambda d: d.get("docType"))
     pedidos_df["from_id"]      = pedidos_df["from_dict"].apply(lambda d: d.get("id"))
@@ -90,16 +89,14 @@ def build_table():
         "total": "Total"
     })[["pedido_id", "Pedido Date", "Pedido DocNum", "Client", "Total", "from_docType", "from_id"]]
 
-    # 5) Build each flow
-
-    # A) Full chain: Presupuesto ← Proforma ← Pedido
+    # 5A) Full chain: Presupuesto ← Proforma ← Pedido
     pedido_proforma = (
         pedido_base[pedido_base["from_docType"] == "proform"]
-        .merge(proforma_df,    left_on="from_id",               right_on="proforma_id",        how="left")
-        .merge(presupuesto_df, left_on="from_id_presupuesto",   right_on="presupuesto_id",    how="left")
+        .merge(proforma_df,    left_on="from_id",             right_on="proforma_id",     how="left")
+        .merge(presupuesto_df, left_on="from_id_presupuesto", right_on="presupuesto_id", how="left")
     )
 
-    # B) Direct Presupuesto ← Pedido
+    # 5B) Direct Presupuesto ← Pedido
     pedido_presupuesto = (
         pedido_base[pedido_base["from_docType"] == "estimate"]
         .merge(presupuesto_df, left_on="from_id", right_on="presupuesto_id", how="left")
@@ -107,15 +104,19 @@ def build_table():
     pedido_presupuesto["Proforma DocNum"] = pd.NA
     pedido_presupuesto["Proforma Date"]   = pd.NaT
 
-    # C) Standalone Pedido (e.g. Wix)
+    # 5C) Standalone Pedido (e.g. Wix → no from)
     pedido_standalone = pedido_base[pedido_base["from_docType"].isna()].copy()
-    for c in ["Presupuesto DocNum", "Presupuesto Date", "Proforma DocNum", "Proforma Date"]:
+    for c in ["presupuesto_id", "from_id_presupuesto", "Proforma DocNum", "Proforma Date"]:
         pedido_standalone[c] = pd.NA
 
-    # 6) Combine
-    all_pedidos = pd.concat([pedido_proforma, pedido_presupuesto, pedido_standalone], ignore_index=True)
+    # 6) Combine all pedido flows
+    all_pedidos = pd.concat([
+        pedido_proforma,
+        pedido_presupuesto,
+        pedido_standalone
+    ], ignore_index=True)
 
-    # 7) Link Albarán
+    # 7) Link to Albarán
     albaran_df["from_dict"] = albaran_df["from"].apply(parse_from_cell)
     albaran_df["from_id"]   = albaran_df["from_dict"].apply(lambda d: d.get("id"))
     albaran_df = albaran_df.rename(columns={
@@ -127,7 +128,7 @@ def build_table():
         albaran_df, left_on="pedido_id", right_on="from_id", how="left"
     )
 
-    # 8) Link Factura
+    # 8) Link to Factura
     factura_df["from_dict"] = factura_df["from"].apply(parse_from_cell)
     factura_df["from_id"]   = factura_df["from_dict"].apply(lambda d: d.get("id"))
     factura_df = factura_df[factura_df["from_dict"].apply(lambda d: d.get("docType") == "waybill")]
@@ -139,30 +140,38 @@ def build_table():
         factura_df, left_on="albaran_id", right_on="albaran_id", how="left"
     )
 
-    # 9) Convert timestamps → Europe/Madrid datetime
+    # 9) Timezone-aware datetime → Europe/Madrid
     madrid_tz = pytz.timezone("Europe/Madrid")
-    date_cols = ["Presupuesto Date", "Proforma Date", "Pedido Date", "Albaran Date", "Factura Date"]
-    for col in date_cols:
+    for col in ["Presupuesto Date", "Proforma Date", "Pedido Date", "Albaran Date", "Factura Date"]:
         all_pedidos[col] = (
             pd.to_datetime(all_pedidos[col], unit="s", utc=True)
               .dt.tz_convert(madrid_tz)
+              .dt.strftime("%d-%m-%Y")
         )
 
-    # 10) Compute stage durations
-    all_pedidos["Pres → Prof (days)"] = (all_pedidos["Proforma Date"] - all_pedidos["Presupuesto Date"]).dt.days
-    all_pedidos["Prof → Ped (days)"] = (all_pedidos["Pedido Date"]   - all_pedidos["Proforma Date"]).dt.days
-    all_pedidos["Ped → Alb (days)"]  = (all_pedidos["Albaran Date"]  - all_pedidos["Pedido Date"]).dt.days
-    all_pedidos["Alb → Fac (days)"]  = (all_pedidos["Factura Date"]  - all_pedidos["Albaran Date"]).dt.days
+    # 10) Durations
+    all_pedidos["Pres → Prof (days)"] = (
+        pd.to_datetime(all_pedidos["Proforma Date"], format="%d-%m-%Y", errors="coerce")
+        - pd.to_datetime(all_pedidos["Presupuesto Date"], format="%d-%m-%Y", errors="coerce")
+    ).dt.days
+    all_pedidos["Prof → Ped (days)"] = (
+        pd.to_datetime(all_pedidos["Pedido Date"], format="%d-%m-%Y", errors="coerce")
+        - pd.to_datetime(all_pedidos["Proforma Date"], format="%d-%m-%Y", errors="coerce")
+    ).dt.days
+    all_pedidos["Ped → Alb (days)"] = (
+        pd.to_datetime(all_pedidos["Albaran Date"], format="%d-%m-%Y", errors="coerce")
+        - pd.to_datetime(all_pedidos["Pedido Date"], format="%d-%m-%Y", errors="coerce")
+    ).dt.days
+    all_pedidos["Alb → Fac (days)"] = (
+        pd.to_datetime(all_pedidos["Factura Date"], format="%d-%m-%Y", errors="coerce")
+        - pd.to_datetime(all_pedidos["Albaran Date"], format="%d-%m-%Y", errors="coerce")
+    ).dt.days
 
-    # 11) Format dates for display
-    for col in date_cols:
-        all_pedidos[col] = all_pedidos[col].dt.strftime("%d-%m-%Y")
-
-    # 12) Sort by most recent Pedido Date
+    # 11) Sort by most recent Pedido Date
     all_pedidos["__sort_date"] = pd.to_datetime(all_pedidos["Pedido Date"], format="%d-%m-%Y", errors="coerce")
     all_pedidos = all_pedidos.sort_values("__sort_date", ascending=False).drop(columns="__sort_date")
 
-    # 13) Final column ordering
+    # 12) Final columns
     return all_pedidos[[
         "Client", "Total",
         "Presupuesto DocNum", "Presupuesto Date", "Pres → Prof (days)",
@@ -177,20 +186,20 @@ df = build_table()
 
 search = st.text_input("Filter by Pedido Doc Number (optional):", placeholder="e.g. SO250066")
 if search:
-    df = df[df["Pedido DocNum"].astype(str).str.contains(search, case=False)]
+    df = df[df["Pedido DocNum"].str.contains(search, case=False, na=False)]
 
 if df.empty:
     st.warning("No documents found.")
 else:
     st.dataframe(df, use_container_width=True)
-    filename = f"{search}_order_timeline.xlsx" if search else "order_timeline.xlsx"
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Sheet1")
-    buffer.seek(0)
+    fname = f"{search}_order_timeline.xlsx" if search else "order_timeline.xlsx"
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as w:
+        df.to_excel(w, index=False, sheet_name="Sheet1")
+    buf.seek(0)
     st.download_button(
         label="📥 Download Excel",
-        data=buffer,
-        file_name=filename,
+        data=buf,
+        file_name=fname,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )

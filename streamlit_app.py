@@ -13,25 +13,26 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    user_input = st.text_input("🔐 Enter password to access", type="password")
+    user_input = st.text_input("🔐 Enter passcode to access:", type="password")
     if user_input == PASSCODE:
         st.session_state.authenticated = True
         st.rerun()
     elif user_input:
-        st.error("Incorrect password.")
+        st.error("Incorrect passcode.")
     st.stop()
 
-st.set_page_config(page_title="Order Document Timeline", layout="wide")
+# ---------- PAGE SETUP ----------
+st.set_page_config(page_title="📄 Order Document Timeline Report", layout="wide")
 st.title("📄 Order Document Timeline Report")
 
 st.markdown("""
-This tool displays the complete timeline of each order through the document lifecycle:  
+This tool displays the complete lifecycle of orders through all document stages:  
 **Presupuesto → Proforma → Pedido → Albarán → Factura**  
-You can search by any **Pedido** document number.
+All dates, transitions, and document numbers are pulled live from the Holded API.
 """)
 
-# ---------- UTIL ----------
-def parse_cell(x):
+# ---------- HELPER ----------
+def parse_from_cell(x):
     if isinstance(x, dict):
         return x
     if isinstance(x, str):
@@ -41,7 +42,8 @@ def parse_cell(x):
             return ast.literal_eval(x)
     return {}
 
-# ---------- FETCH FUNCTIONS ----------
+# ---------- FETCH DOCS ----------
+@st.cache_data(ttl=3600)
 def fetch_docs(doc_type):
     url = f"https://api.holded.com/api/invoicing/v1/documents/{doc_type}"
     headers = {"accept": "application/json", "key": api_key}
@@ -49,96 +51,84 @@ def fetch_docs(doc_type):
     resp.raise_for_status()
     return pd.DataFrame(resp.json())
 
+# ---------- BUILD FULL TABLE ----------
 @st.cache_data(ttl=3600)
 def build_table():
-    presup = fetch_docs("estimate")[["id", "date", "docNumber", "contactName", "total"]]
-    presup.rename(columns={
-        "id": "pres_id",
-        "date": "Presupuesto Date",
-        "docNumber": "Presupuesto DocNum",
-        "contactName": "Client",
-        "total": "Total (€)"
-    }, inplace=True)
+    presupuesto = fetch_docs("estimate")[["id", "clientName", "total", "date", "docNumber"]]
+    presupuesto.columns = ["Presupuesto ID", "Client", "Total", "Presupuesto Date", "Presupuesto DocNum"]
 
     proforma = fetch_docs("proform")
-    proforma["from_dict"] = proforma["from"].apply(parse_cell)
+    proforma["from_dict"] = proforma["from"].apply(parse_from_cell)
     proforma = proforma[proforma["from_dict"].apply(lambda d: d.get("docType") == "estimate")]
-    proforma["pres_id"] = proforma["from_dict"].apply(lambda d: d.get("id"))
-    proforma.rename(columns={
-        "id": "prof_id",
-        "date": "Proforma Date",
-        "docNumber": "Proforma DocNum"
-    }, inplace=True)
+    proforma["Presupuesto ID"] = proforma["from_dict"].apply(lambda d: d.get("id"))
+    proforma = proforma[["Presupuesto ID", "date", "docNumber", "id"]]
+    proforma.columns = ["Presupuesto ID", "Proforma Date", "Proforma DocNum", "Proforma ID"]
 
     pedido = fetch_docs("salesorder")
-    pedido["from_dict"] = pedido["from"].apply(parse_cell)
+    pedido["from_dict"] = pedido["from"].apply(parse_from_cell)
     pedido = pedido[pedido["from_dict"].apply(lambda d: d.get("docType") == "proform")]
-    pedido["prof_id"] = pedido["from_dict"].apply(lambda d: d.get("id"))
-    pedido.rename(columns={
-        "id": "pedido_id",
-        "date": "Pedido Date",
-        "docNumber": "Pedido DocNum"
-    }, inplace=True)
+    pedido["Proforma ID"] = pedido["from_dict"].apply(lambda d: d.get("id"))
+    pedido = pedido[["Proforma ID", "date", "docNumber", "id"]]
+    pedido.columns = ["Proforma ID", "Pedido Date", "Pedido DocNum", "Pedido ID"]
 
-    albaran = fetch_docs("deliverynote")
-    albaran["from_dict"] = albaran["from"].apply(parse_cell)
+    albaran = fetch_docs("waybill")
+    albaran["from_dict"] = albaran["from"].apply(parse_from_cell)
     albaran = albaran[albaran["from_dict"].apply(lambda d: d.get("docType") == "salesorder")]
-    albaran["pedido_id"] = albaran["from_dict"].apply(lambda d: d.get("id"))
-    albaran.rename(columns={
-        "id": "albaran_id",
-        "date": "Albarán Date",
-        "docNumber": "Albarán DocNum"
-    }, inplace=True)
+    albaran["Pedido ID"] = albaran["from_dict"].apply(lambda d: d.get("id"))
+    albaran = albaran[["Pedido ID", "date", "docNumber", "id"]]
+    albaran.columns = ["Pedido ID", "Albarán Date", "Albarán DocNum", "Albarán ID"]
 
     factura = fetch_docs("invoice")
-    factura["from_dict"] = factura["from"].apply(parse_cell)
-    factura = factura[factura["from_dict"].apply(lambda d: d.get("docType") == "deliverynote")]
-    factura["albaran_id"] = factura["from_dict"].apply(lambda d: d.get("id"))
-    factura.rename(columns={
-        "id": "factura_id",
-        "date": "Factura Date",
-        "docNumber": "Factura DocNum"
-    }, inplace=True)
+    factura["from_dict"] = factura["from"].apply(parse_from_cell)
+    factura = factura[factura["from_dict"].apply(lambda d: d.get("docType") == "waybill")]
+    factura["Albarán ID"] = factura["from_dict"].apply(lambda d: d.get("id"))
+    factura = factura[["Albarán ID", "date", "docNumber"]]
+    factura.columns = ["Albarán ID", "Factura Date", "Factura DocNum"]
 
-    # Merge all
-    df = presup.merge(proforma, on="pres_id", how="left")\
-               .merge(pedido, on="prof_id", how="left")\
-               .merge(albaran, on="pedido_id", how="left")\
-               .merge(factura, on="albaran_id", how="left")
+    # Merge step-by-step
+    df = presupuesto.merge(proforma, on="Presupuesto ID", how="left")
+    df = df.merge(pedido, on="Proforma ID", how="left")
+    df = df.merge(albaran, on="Pedido ID", how="left")
+    df = df.merge(factura, on="Albarán ID", how="left")
 
     # Convert dates
-    date_cols = [
-        "Presupuesto Date", "Proforma Date", "Pedido Date",
-        "Albarán Date", "Factura Date"
-    ]
+    date_cols = ["Presupuesto Date", "Proforma Date", "Pedido Date", "Albarán Date", "Factura Date"]
     for col in date_cols:
         df[col] = pd.to_datetime(df[col], errors="coerce")
 
-    # Calculate durations
-    df["→ Proforma (Days)"] = (df["Proforma Date"] - df["Presupuesto Date"]).dt.days
-    df["→ Pedido (Days)"] = (df["Pedido Date"] - df["Proforma Date"]).dt.days
-    df["→ Albarán (Days)"] = (df["Albarán Date"] - df["Pedido Date"]).dt.days
-    df["→ Factura (Days)"] = (df["Factura Date"] - df["Albarán Date"]).dt.days
+    # Calculate differences in days
+    df["→ Proforma"] = (df["Proforma Date"] - df["Presupuesto Date"]).dt.days
+    df["→ Pedido"]   = (df["Pedido Date"] - df["Proforma Date"]).dt.days
+    df["→ Albarán"]  = (df["Albarán Date"] - df["Pedido Date"]).dt.days
+    df["→ Factura"]  = (df["Factura Date"] - df["Albarán Date"]).dt.days
 
-    # Reorder
-    final_cols = [
-        "Client", "Total (€)",
-        "Presupuesto Date", "→ Proforma (Days)", "Proforma Date", "→ Pedido (Days)",
-        "Pedido Date", "→ Albarán (Days)", "Albarán Date", "→ Factura (Days)", "Factura Date",
+    # Reorder columns
+    ordered_cols = [
+        "Client", "Total",
+        "Presupuesto Date", "→ Proforma",
+        "Proforma Date", "→ Pedido",
+        "Pedido Date", "→ Albarán",
+        "Albarán Date", "→ Factura",
+        "Factura Date",
         "Presupuesto DocNum", "Proforma DocNum", "Pedido DocNum", "Albarán DocNum", "Factura DocNum"
     ]
-    return df[final_cols]
+    return df[ordered_cols]
 
 # ---------- UI ----------
 df = build_table()
 
-pedido_search = st.text_input("Search by Pedido DocNum (optional):")
-if pedido_search:
-    df = df[df["Pedido DocNum"].str.contains(pedido_search, case=False, na=False)]
+# Sort by Presupuesto Date
+df = df.sort_values("Presupuesto Date")
+
+search_input = st.text_input("Filter by Pedido Doc Number:")
+if search_input:
+    df = df[df["Pedido DocNum"].astype(str).str.contains(search_input, case=False)]
 
 if df.empty:
-    st.warning("No documents found.")
+    st.warning("No matching documents found.")
 else:
+    st.success("✅ Document timeline loaded successfully!")
     st.dataframe(df, use_container_width=True)
+
     csv = df.to_csv(index=False).encode("utf-8-sig")
     st.download_button("📥 Download CSV", data=csv, file_name="order_document_timeline.csv", mime="text/csv")

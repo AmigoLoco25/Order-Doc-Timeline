@@ -31,6 +31,9 @@ This tool displays the complete lifecycle of orders through all document stages:
 All data is pulled live from Holded via the API.
 """)
 
+if st.button("🔄 Refresh Data"):
+    st.cache_data.clear()
+
 # ---------- HELPERS ----------
 def parse_from_cell(x):
     if isinstance(x, dict):

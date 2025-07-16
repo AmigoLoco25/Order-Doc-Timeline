@@ -156,9 +156,6 @@ if df.empty:
 else:
     st.dataframe(df, use_container_width=True)
 
-    csv = df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button("📥 Download CSV", data=csv, file_name="order_timeline.csv", mime="text/csv")
-
     if search:
         filename=f"{search}_order_timeline.xlsx"
     else:

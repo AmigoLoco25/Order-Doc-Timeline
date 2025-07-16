@@ -15,7 +15,7 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    user_input = st.text_input("🔐 Enter Passcode", type="password")
+    user_input = st.text_input("🔐 Enter Passode", type="password")
     if user_input == PASSCODE:
         st.session_state.authenticated = True
         st.rerun()

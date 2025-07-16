@@ -113,9 +113,9 @@ def build_table():
     for col in date_cols:
         if col in df.columns:
             df[col] = df[col].apply(
-                lambda ts: datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(madrid_tz).date()
-                if pd.notnull(ts) else pd.NaT
-            )
+    lambda ts: datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(madrid_tz)
+    if pd.notnull(ts) else pd.NaT
+)
 
     # Time differences
     df["Pres → Prof (days)"] = (df["Proforma Date"] - df["Presupuesto Date"]).dt.days

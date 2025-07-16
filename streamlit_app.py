@@ -64,47 +64,47 @@ def build_table():
     proforma = fetch_docs("proform")
     proforma["from_dict"] = proforma["from"].apply(parse_from_cell)
     proforma = proforma[proforma["from_dict"].apply(lambda d: d.get("docType") == "estimate")]
-    proforma["from_id"] = proforma["from_dict"].apply(lambda d: d.get("id"))
+    proforma["from_id_proforma"] = proforma["from_dict"].apply(lambda d: d.get("id"))
     proforma = proforma.rename(columns={
         "id": "proforma_id",
         "date": "Proforma Date",
         "docNumber": "Proforma DocNum"
-    })[["from_id", "proforma_id", "Proforma Date", "Proforma DocNum"]]
+    })[["from_id_proforma", "proforma_id", "Proforma Date", "Proforma DocNum"]]
 
     pedido = fetch_docs("salesorder")
     pedido["from_dict"] = pedido["from"].apply(parse_from_cell)
     pedido = pedido[pedido["from_dict"].apply(lambda d: d.get("docType") == "proform")]
-    pedido["from_id"] = pedido["from_dict"].apply(lambda d: d.get("id"))
+    pedido["from_id_pedido"] = pedido["from_dict"].apply(lambda d: d.get("id"))
     pedido = pedido.rename(columns={
         "id": "pedido_id",
         "date": "Pedido Date",
         "docNumber": "Pedido DocNum"
-    })[["from_id", "pedido_id", "Pedido Date", "Pedido DocNum"]]
+    })[["from_id_pedido", "pedido_id", "Pedido Date", "Pedido DocNum"]]
 
     albaran = fetch_docs("waybill")
     albaran["from_dict"] = albaran["from"].apply(parse_from_cell)
     albaran = albaran[albaran["from_dict"].apply(lambda d: d.get("docType") == "salesorder")]
-    albaran["from_id"] = albaran["from_dict"].apply(lambda d: d.get("id"))
+    albaran["from_id_albaran"] = albaran["from_dict"].apply(lambda d: d.get("id"))
     albaran = albaran.rename(columns={
         "id": "albaran_id",
         "date": "Albaran Date",
         "docNumber": "Albaran DocNum"
-    })[["from_id", "albaran_id", "Albaran Date", "Albaran DocNum"]]
+    })[["from_id_albaran", "albaran_id", "Albaran Date", "Albaran DocNum"]]
 
     factura = fetch_docs("invoice")
     factura["from_dict"] = factura["from"].apply(parse_from_cell)
     factura = factura[factura["from_dict"].apply(lambda d: d.get("docType") == "waybill")]
-    factura["from_id"] = factura["from_dict"].apply(lambda d: d.get("id"))
+    factura["from_id_factura"] = factura["from_dict"].apply(lambda d: d.get("id"))
     factura = factura.rename(columns={
         "date": "Factura Date",
         "docNumber": "Factura DocNum"
-    })[["from_id", "Factura Date", "Factura DocNum"]]
+    })[["from_id_factura", "Factura Date", "Factura DocNum"]]
 
     # Merge
-    df = presupuesto.merge(proforma, left_on="presupuesto_id", right_on="from_id", how="left")
-    df = df.merge(pedido, left_on="proforma_id", right_on="from_id", how="left")
-    df = df.merge(albaran, left_on="pedido_id", right_on="from_id", how="left")
-    df = df.merge(factura, left_on="albaran_id", right_on="from_id", how="left")
+    df = presupuesto.merge(proforma, left_on="presupuesto_id", right_on="from_id_proforma", how="left")
+    df = df.merge(pedido, left_on="proforma_id", right_on="from_id_pedido", how="left")
+    df = df.merge(albaran, left_on="pedido_id", right_on="from_id_albaran", how="left")
+    df = df.merge(factura, left_on="albaran_id", right_on="from_id_factura", how="left")
 
     # Convert to datetime
     for col in ["Presupuesto Date", "Proforma Date", "Pedido Date", "Albaran Date", "Factura Date"]:

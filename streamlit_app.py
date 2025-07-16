@@ -1,109 +1,63 @@
 import streamlit as st
 import pandas as pd
 import requests
-import json
-import ast
-from datetime import datetime
 
 # ---------- AUTHENTICATION ----------
 api_key = st.secrets["HOLDED_API_KEY"]
 PASSCODE = st.secrets["STREAMLIT_PASSCODE"]
 
+# Require login passcode
 if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    user_input = st.text_input("🔐 Ingrese la contraseña", type="password")
+    st.title("🔐 Secure Access")
+    user_input = st.text_input("Enter the passcode to access this app:", type="password")
     if user_input == PASSCODE:
         st.session_state.authenticated = True
         st.rerun()
     elif user_input:
-        st.error("Contraseña incorrecta.")
+        st.error("Incorrect passcode.")
     st.stop()
 
-st.set_page_config(page_title="Fechas entre Documentos", layout="wide")
-st.title("📄 Fechas entre Presupuesto → Proforma → Pedido")
+# ---------- STREAMLIT UI ----------
+st.set_page_config(page_title="Order Document Timeline", layout="wide")
+st.title("📄 Order Document Timeline Report")
 
-st.markdown("Ingrese un número de documento o deje vacío para ver todos.")
+st.markdown("""
+This tool displays the complete lifecycle of orders through all document stages:
+**Presupuesto → Proforma → Pedido → Albaran → Factura**.
 
-# ---------- HELPER ----------
-def parse_from_cell(x):
-    if isinstance(x, dict):
-        return x
-    if isinstance(x, str):
-        try:
-            return json.loads(x)
-        except:
-            return ast.literal_eval(x)
-    return {}
+All dates, transitions, and document numbers are pulled via the Holded API.
+""")
 
-# ---------- FETCH ESTIMATES ----------
+# ---------- LOAD DATA ----------
 @st.cache_data(ttl=3600)
-def fetch_estimates():
-    url = "https://api.holded.com/api/invoicing/v1/documents/estimate"
-    headers = {"accept": "application/json", "key": api_key}
-    resp = requests.get(url, headers=headers)
-    df = pd.DataFrame(resp.json())
-    return df[["id", "date", "docNumber"]].rename(columns={"date": "Presupuesto Date", "docNumber": "Presupuesto DocNum"})
+def load_order_data():
+    file_path = "main.csv"  # Ensure this CSV is in your GitHub repo
+    df = pd.read_csv(file_path)
+    return df
 
-# ---------- FETCH PROFORMAS ----------
-@st.cache_data(ttl=3600)
-def fetch_proformas():
-    url = "https://api.holded.com/api/invoicing/v1/documents/proform"
-    headers = {"accept": "application/json", "key": api_key}
-    resp = requests.get(url, headers=headers)
-    df = pd.DataFrame(resp.json())
-    df["from_dict"] = df["from"].apply(parse_from_cell)
-    df = df[df["from_dict"].apply(lambda d: d.get("docType") == "estimate")]
-    df["from_id"] = df["from_dict"].apply(lambda d: d.get("id"))
-    df = df.rename(columns={"date": "Proforma Date", "docNumber": "Proforma DocNum", "id": "prof_id"})
-    return df[["Proforma Date", "Proforma DocNum", "from_id", "prof_id"]].rename(columns={"from_id": "id"})
+df = load_order_data()
 
-# ---------- FETCH PEDIDOS ----------
-@st.cache_data(ttl=3600)
-def fetch_pedidos():
-    url = "https://api.holded.com/api/invoicing/v1/documents/salesorder"
-    headers = {"accept": "application/json", "key": api_key}
-    resp = requests.get(url, headers=headers)
-    df = pd.DataFrame(resp.json())
-    df["from_dict"] = df["from"].apply(parse_from_cell)
-    df = df[df["from_dict"].apply(lambda d: d.get("docType") == "proform")]
-    df["from_id"] = df["from_dict"].apply(lambda d: d.get("id"))
-    df = df.rename(columns={"date": "Pedido Date", "docNumber": "Pedido DocNum", "id": "pedido_id"})
-    return df[["Pedido Date", "Pedido DocNum", "from_id", "pedido_id"]].rename(columns={"from_id": "prof_id"})
-
-# ---------- PROCESS ----------
-def build_table():
-    pres = fetch_estimates()
-    prof = fetch_proformas()
-    ped = fetch_pedidos()
-
-    merged = pd.merge(pres, prof, on="id", how="left")
-    merged = pd.merge(merged, ped, on="prof_id", how="left")
-
-    # Convert to datetime
-    for col in ["Presupuesto Date", "Proforma Date", "Pedido Date"]:
-        merged[col] = pd.to_datetime(merged[col], errors="coerce")
-
-    # Calculate intervals
-    merged["Días a Proforma"] = (merged["Proforma Date"] - merged["Presupuesto Date"]).dt.days
-    merged["Días a Pedido"] = (merged["Pedido Date"] - merged["Proforma Date"]).dt.days
-
-    return merged
-
-# ---------- UI ----------
-df = build_table()
-
-search_input = st.text_input("Filtrar por DocNumber (opcional):")
-if search_input:
-    df = df[df.apply(lambda row: search_input.lower() in str(row["Presupuesto DocNum"]).lower(), axis=1)]
-
-if df.empty:
-    st.warning("No se encontraron documentos.")
+# ---------- DISPLAY FILTERED DATA ----------
+search_client = st.text_input("Search by Client Name (optional):", placeholder="e.g. John Doe")
+if search_client:
+    filtered_df = df[df["Cliente"].str.contains(search_client, case=False, na=False)]
 else:
-    st.success("Datos obtenidos correctamente.")
-    st.dataframe(df, use_container_width=True)
+    filtered_df = df
 
-    csv = df.to_csv(index=False).encode("utf-8-sig")
-    st.download_button("📥 Descargar CSV", data=csv, file_name="documentos_holded.csv", mime="text/csv")
+if filtered_df.empty:
+    st.warning("No results found.")
+else:
+    st.success(f"{len(filtered_df)} results found.")
+    st.dataframe(filtered_df, use_container_width=True)
 
+    # Download button
+    csv = filtered_df.to_csv(index=False).encode("utf-8-sig")
+    st.download_button(
+        "📥 Download CSV",
+        data=csv,
+        file_name="order_timeline.csv",
+        mime="text/csv"
+    )

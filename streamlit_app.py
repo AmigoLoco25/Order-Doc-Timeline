@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import requests
 
-# ---------------------- AUTHENTICATION ----------------------
+# ---------- 🔐 AUTH ----------
 api_key = st.secrets["HOLDED_API_KEY"]
 PASSCODE = st.secrets["STREAMLIT_PASSCODE"]
 
@@ -10,7 +10,7 @@ if "authenticated" not in st.session_state:
     st.session_state.authenticated = False
 
 if not st.session_state.authenticated:
-    user_input = st.text_input("🔐 Enter Access Passcode", type="password")
+    user_input = st.text_input("🔐 Enter access passcode", type="password")
     if user_input == PASSCODE:
         st.session_state.authenticated = True
         st.rerun()
@@ -18,9 +18,10 @@ if not st.session_state.authenticated:
         st.error("Incorrect passcode.")
     st.stop()
 
-# ---------------------- STREAMLIT PAGE SETUP ----------------------
+# ---------- 📄 TITLE PAGE ----------
 st.set_page_config(page_title="Order Document Timeline", layout="wide")
 st.title("📄 Order Document Timeline Report")
+
 st.markdown("""
 This tool displays the complete lifecycle of orders through all document stages:  
 **Presupuesto → Proforma → Pedido → Albarán**
@@ -28,8 +29,7 @@ This tool displays the complete lifecycle of orders through all document stages:
 All dates, transitions, and document numbers are pulled live from the Holded API.
 """)
 
-# ---------------------- HELPER FUNCTIONS ----------------------
-
+# ---------- 🔁 API DOC FETCH ----------
 @st.cache_data(ttl=600)
 def fetch_documents(doc_type):
     """Fetch documents of a given type from Holded."""
@@ -37,52 +37,56 @@ def fetch_documents(doc_type):
     headers = {"accept": "application/json", "key": api_key}
     response = requests.get(url, headers=headers)
     response.raise_for_status()
-    return pd.DataFrame(response.json())
 
+    data = response.json()
+    if isinstance(data, dict) and "data" in data:
+        return pd.DataFrame(data["data"])
+    elif isinstance(data, list):
+        return pd.DataFrame(data)
+    else:
+        return pd.DataFrame()
+
+# ---------- 🧩 BUILD TIMELINE ----------
 @st.cache_data(ttl=600)
-def build_timeline_df():
-    """Construct timeline of all documents."""
+def build_timeline():
     doc_types = {
-        "presupuesto": "Presupuesto",
+        "estimate": "Presupuesto",
         "proform": "Proforma",
         "salesorder": "Pedido",
         "deliverynote": "Albarán"
     }
 
-    timeline_records = []
+    all_docs = []
 
-    for api_name, label in doc_types.items():
+    for endpoint, label in doc_types.items():
         try:
-            df = fetch_documents(api_name)
+            df = fetch_documents(endpoint)
+            if not df.empty:
+                df = df[["name", "client", "docNumber", "date"]].copy()
+                df["Document Type"] = label
+                all_docs.append(df)
         except Exception as e:
-            st.warning(f"Error fetching {label}: {e}")
-            continue
+            st.error(f"Error fetching {label}: {e}")
 
-        for _, row in df.iterrows():
-            timeline_records.append({
-                "Client": row.get("contactName", "Unknown"),
-                "Document Type": label,
-                "Document Number": row.get("docNumber", "N/A"),
-                "Date": row.get("date", "")[:10]
-            })
+    if not all_docs:
+        return pd.DataFrame()
 
-    return pd.DataFrame(timeline_records).sort_values(by=["Client", "Date"])
+    combined = pd.concat(all_docs)
+    combined.rename(columns={
+        "name": "Client Name",
+        "client": "Client ID",
+        "docNumber": "Document Number",
+        "date": "Date"
+    }, inplace=True)
 
-# ---------------------- MAIN APP ----------------------
+    combined["Date"] = pd.to_datetime(combined["Date"], errors="coerce")
+    return combined.sort_values(["Client ID", "Date"])
 
-if st.button("📊 Generate Timeline Report"):
-    try:
-        df = build_timeline_df()
+# ---------- 📊 DISPLAY TIMELINE ----------
+df = build_timeline()
 
-        if df.empty:
-            st.warning("No documents found.")
-        else:
-            st.success("Report generated successfully!")
-            st.dataframe(df, use_container_width=True)
-
-            # Optional: CSV download
-            csv = df.to_csv(index=False).encode("utf-8-sig")
-            st.download_button("📥 Download CSV", csv, "order_timeline.csv", "text/csv")
-
-    except Exception as e:
-        st.error(f"Error loading data: {e}")
+if df.empty:
+    st.warning("No documents retrieved.")
+else:
+    st.success(f"{len(df)} documents loaded.")
+    st.dataframe(df, use_container_width=True)

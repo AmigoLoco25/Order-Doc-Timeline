@@ -131,7 +131,7 @@ def build_table():
     for col in date_cols:
         df[col] = df[col].dt.strftime("%d-%m-%Y")
         
-    df["__sort_date"] = pd.to_datetime(df["Presupuesto Date"], format="%d-%m-%Y", errors="coerce")
+    df["__sort_date"] = pd.to_datetime(df["Pedido Date"], format="%d-%m-%Y", errors="coerce")
     df = df.sort_values("__sort_date", ascending=False).drop(columns="__sort_date")
     
     # Reorder final columns

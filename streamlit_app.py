@@ -173,16 +173,15 @@ def build_table():
 
 
     #####
-    all_pedidos["Pedido DocNum"]  = all_pedidos["Pedido DocNum"].astype(str)
-    all_pedidos["Serie Pedido"] = ""
+    raw = all_pedidos["Pedido DocNum"].astype(str)
+    clean = raw.str.strip().str.normalize("NFKC").str.lower()
     
-    for i, pedido_str in enumerate(all_pedidos["Pedido DocNum"]):
-        low = pedido_str.lower()
-        if low.startswith("so"):
-            all_pedidos.loc[i, "Serie Pedido"] = "SO"
-        else:
-            all_pedidos.loc[i, "Serie Pedido"] = "WIX"
-    
+    all_pedidos["Serie Pedido"] = np.select(
+        [clean.str.startswith("so"), clean.str.startswith("wix")],
+        ["SO",                "WIX"],
+        default=""
+    )
+        
     all_pedidos["Serie Factura"] = ""
 
     # items() replaces iteritems() in pandas ≥2.0

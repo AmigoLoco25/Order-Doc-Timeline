@@ -177,16 +177,17 @@ def build_table():
         pedido_str = str(pedido)    
         if pedido_str[:2].lower() == "so":
             all_pedidos["Serie Pedido"] = "SO"
-        if pedido_str[:3].lower() == "wix":
+        
+        elif pedido_str[:3].lower() == "wix":
             all_pedidos["Serie Pedido"] = "WIX"
 
     for factura in all_pedidos["Factura DocNum"]:
         factura_str = str(factura)    
         if factura_str[:1].lower() == "f":
             all_pedidos["Serie Factura"] = "F"
-        if factura_str[:1].lower() == "w":
+        elif factura_str[:1].lower() == "w":
             all_pedidos["Serie Factura"] = "W" 
-        if factura_str[:3].lower() == "int":
+        elif factura_str[:3].lower() == "int":
             all_pedidos["Serie Factura"] = "INT"
 
     

@@ -196,7 +196,7 @@ def build_table():
         elif low.startswith("int"):
             all_pedidos.loc[i, "Serie Factura"] = "INT"
         elif low.startswith("w"):
-            all_pedidos.loc[i, "Serie Factura"] = "W
+            all_pedidos.loc[i, "Serie Factura"] = "W"
 
     
     # 12) Final columns

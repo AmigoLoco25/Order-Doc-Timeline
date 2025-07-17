@@ -183,13 +183,12 @@ def build_table():
         elif low.startswith("wix"):
             all_pedidos.loc[i, "Serie Pedido"] = "WIX"
     
-    all_pedidos["Factura DocNum"] = all_pedidos["Factura DocNum"].astype(str)
-    all_pedidos["Serie Factura"] = ""  # initialize all to blank
-    
-    for i, factura_str in all_pedidos["Factura DocNum"].iteritems():
-        low = factura_str.lower().strip()
+    all_pedidos["Serie Factura"] = ""
+
+    # items() replaces iteritems() in pandas ≥2.0
+    for i, factura_str in all_pedidos["Factura DocNum"].items():
+        low = str(factura_str).lower().strip()
         if not low:
-            # leave as blank string
             continue
         if low.startswith("f"):
             all_pedidos.loc[i, "Serie Factura"] = "F"

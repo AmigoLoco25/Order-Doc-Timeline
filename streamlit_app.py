@@ -209,7 +209,7 @@ def build_table():
     )
     
     print("Bad rows:")
-    print(df.loc[mask, "Pedido DocNum"].apply(repr))
+    st.datadframe(df.loc[mask, "Pedido DocNum"].apply(repr))
     
     # 12) Final columns
     return all_pedidos[[

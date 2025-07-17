@@ -180,7 +180,7 @@ def build_table():
         if pedido_str[:3].lower() == "wix":
             all_pedidos["Serie Pedido"] = "WIX"
 
-     for factura in all_pedidos["Factura DocNum"]:
+    for factura in all_pedidos["Factura DocNum"]:
         factura_str = str(factura)    
         if factura_str[:1].lower() == "f":
             all_pedidos["Serie Factura"] = "F"

@@ -174,7 +174,7 @@ def build_table():
 
     #####
     all_pedidos["Pedido DocNum"]  = all_pedidos["Pedido DocNum"].astype(str)
-    all_pedidos["Serie Pedido"] = None  # initialize
+    all_pedidos["Serie Pedido"] = ""
     
     for i, pedido_str in enumerate(all_pedidos["Pedido DocNum"]):
         low = pedido_str.lower()

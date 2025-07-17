@@ -180,7 +180,7 @@ def build_table():
         low = pedido_str.lower()
         if low.startswith("so"):
             all_pedidos.loc[i, "Serie Pedido"] = "SO"
-        elif low.startswith("wix"):
+        else:
             all_pedidos.loc[i, "Serie Pedido"] = "WIX"
     
     all_pedidos["Serie Factura"] = ""
@@ -197,19 +197,6 @@ def build_table():
         elif low.startswith("w"):
             all_pedidos.loc[i, "Serie Factura"] = "W"
 
-
-
-    df = all_pedidos.copy()
-    df["Pedido DocNum"] = df["Pedido DocNum"].astype(str)
-    
-    # Find the “mistakes”
-    mask = (
-        df["Pedido DocNum"].str.lower().str.startswith("so")  # docnums that *should* be SO
-        & (df["Serie Pedido"] == "WIX")                      # but are currently WIX
-    )
-    
-    print("Bad rows:")
-    st.datadframe(df.loc[mask, "Pedido DocNum"].apply(repr))
     
     # 12) Final columns
     return all_pedidos[[

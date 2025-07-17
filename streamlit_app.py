@@ -173,22 +173,27 @@ def build_table():
 
 
     #####
-    for pedido in all_pedidos["Pedido DocNum"]:
-        pedido_str = str(pedido)    
-        if pedido_str[:2].lower() == "so":
-            all_pedidos["Serie Pedido"] = "SO"
-        
-        elif pedido_str[:3].lower() == "wix":
-            all_pedidos["Serie Pedido"] = "WIX"
+    all_pedidos["Pedido DocNum"]  = all_pedidos["Pedido DocNum"].astype(str)
+    all_pedidos["Serie Pedido"] = None  # initialize
+    
+    for i, pedido_str in enumerate(all_pedidos["Pedido DocNum"]):
+        low = pedido_str.lower()
+        if low.startswith("so"):
+            all_pedidos.loc[i, "Serie Pedido"] = "SO"
+        elif low.startswith("wix"):
+            all_pedidos.loc[i, "Serie Pedido"] = "WIX"
+    
+    all_pedidos["Factura DocNum"]  = all_pedidos["Factura DocNum"].astype(str)
+    all_pedidos["Serie Factura"] = None
 
-    for factura in all_pedidos["Factura DocNum"]:
-        factura_str = str(factura)    
-        if factura_str[:1].lower() == "f":
-            all_pedidos["Serie Factura"] = "F"
-        elif factura_str[:1].lower() == "w":
-            all_pedidos["Serie Factura"] = "W" 
-        elif factura_str[:3].lower() == "int":
-            all_pedidos["Serie Factura"] = "INT"
+    for i, factura_str in enumerate(all_pedidos["Factura DocNum"]):
+        low = factura_str.lower()
+        if low.startswith("f"):
+            all_pedidos.loc[i, "Serie Factura"] = "F"
+        elif low.startswith("w"):
+            all_pedidos.loc[i, "Serie Factura"] = "W"
+        elif low.startswith("int"):
+            all_pedidos.loc[i, "Serie Factura"] = "INT"
 
     
     # 12) Final columns

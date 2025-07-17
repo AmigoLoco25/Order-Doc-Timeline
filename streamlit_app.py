@@ -171,6 +171,25 @@ def build_table():
     all_pedidos["__sort_date"] = pd.to_datetime(all_pedidos["Pedido Date"], format="%d-%m-%Y", errors="coerce")
     all_pedidos = all_pedidos.sort_values("__sort_date", ascending=False).drop(columns="__sort_date")
 
+
+    #####
+    for pedido in all_pedidos["Pedido DocNum"]:
+        pedido_str = str(pedido)    
+        if pedido_str[:2].lower() == "so":
+            all_pedidos["Serie Pedido"] = "SO"
+        if pedido_str[:3].lower() == "wix":
+            all_pedidos["Serie Pedido"] = "WIX"
+
+     for factura in all_pedidos["Factura DocNum"]:
+        factura_str = str(factura)    
+        if factura_str[:1].lower() == "f":
+            all_pedidos["Serie Factura"] = "F"
+        if factura_str[:1].lower() == "w":
+            all_pedidos["Serie Factura"] = "W" 
+        if factura_str[:3].lower() == "int":
+            all_pedidos["Serie Factura"] = "INT"
+
+    
     # 12) Final columns
     return all_pedidos[[
         "Client", "Total",
@@ -178,7 +197,7 @@ def build_table():
         "Proforma DocNum",  "Proforma Date",   "Prof → Ped (days)",
         "Pedido DocNum",    "Pedido Date",     "Ped → Alb (days)",
         "Albaran DocNum",   "Albaran Date",    "Alb → Fac (days)",
-        "Factura DocNum",   "Factura Date"
+        "Factura DocNum",   "Factura Date", "Serie Pedido", "Serie Factura"
     ]]
 
 # ---------- UI ----------

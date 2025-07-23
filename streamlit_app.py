@@ -132,7 +132,7 @@ def build_table():
     # 8) Link to Factura
     factura_df["from_dict"] = factura_df["from"].apply(parse_from_cell)
     factura_df["from_id"]   = factura_df["from_dict"].apply(lambda d: d.get("id"))
-    factura_df = factura_df[factura_df["from_dict"].apply(lambda d: d.get("docType") in ["waybill", "salesorder"])]
+    factura_df = factura_df[factura_df["from_dict"].apply(lambda d: d.get("docType") in ["waybill", "salesorder", "proform"])]
     factura_df = factura_df.rename(columns={
         "date": "Factura Date",
         "docNumber": "Factura DocNum"
